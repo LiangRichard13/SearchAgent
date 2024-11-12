@@ -1,20 +1,25 @@
 import logging
 from langchain_openai import ChatOpenAI
 from langchain.agents import initialize_agent
-from langchain_experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
+# from langchain_experimental.plan_and_execute import PlanAndExecute, load_agent_executor, load_chat_planner
 from langchain.agents import AgentType
 from langchain_community.agent_toolkits.load_tools import load_tools
 # 引入记忆组件
-from langchain.memory import ConversationBufferMemory
-from langchain.prompts import MessagesPlaceholder
+# from langchain.memory import ConversationBufferMemory
+# from langchain.prompts import MessagesPlaceholder
+
+#引入长期记忆处理
+from memory.memory import memory_save
 
 # 引入能够读取yaml配置文件的工具
 import yaml
 import os
 # 引入自定义的搜索工具
 from serper_tool import serper_tool
-from rag.rag_tool import rag_tool
+# from rag.rag_tool import rag_tool
+from rag.langchain_rag_tool import rag_tool
 from datetime_tool import datetime_tool
+from memory.memory import long_term_memory_tool
 
 # 引入日志记录
 logging.basicConfig(
@@ -49,26 +54,28 @@ tools = load_tools(
 tools.append(serper_tool)
 tools.append(rag_tool)
 tools.append(datetime_tool)
+tools.append(long_term_memory_tool)
 tools_information =str([{"name": tool.name, "description": tool.description} for tool in tools])
 
 
 # 记忆组件
-memory = ConversationBufferMemory(
-    memory_key="chat_history",
-    return_messages=True
-)
+# memory = ConversationBufferMemory(
+#     memory_key="chat_history",
+#     return_messages=True
+# )
 
 # 初始化gent
 complex_agent = initialize_agent(
     tools,
     llm,
+    # agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
     agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
     verbose=True,
     handle_parsing_errors=True,
-    memory=memory,
-        agent_kwargs={
-        "extra_prompt_messages":[MessagesPlaceholder(variable_name="chat_history"),MessagesPlaceholder(variable_name="agent_scratchpad")],
-    }
+    # memory=memory,
+    #     agent_kwargs={
+    #     "extra_prompt_messages":[MessagesPlaceholder(variable_name="chat_history"),MessagesPlaceholder(variable_name="agent_scratchpad")],
+    # }
 )
 
 # 加载规划器和执行器
@@ -81,6 +88,7 @@ complex_agent = initialize_agent(
 def determine_task_type(query):
     # 提供初步提示让大模型判断
     judgment_prompt = f"""
+    Here is the conversation history:"{history}"
     Here is the user's request: "{query}" Please analyze whether this task requires a multi-step plan and execution.
     If it is a simple task that does not require any external tools, please return "simple." 
     If it is a complex task that requires the use of external tools, please return "complex." 
@@ -90,25 +98,41 @@ def determine_task_type(query):
     return "complex" if "complex" in result else "simple"
 
 def task_implement(query):
-    judge=determine_task_type(query)
-    if "complex" in judge:
-        try:
-            prompt=plan_before_implement(query)
-            output=complex_agent(prompt)
-            logger.info(f"Query: {query}")
-            logger.info(f"Plan:{prompt}")
-            logger.info(f"Output: {output}")
-            print(output)
-        except IndexError as e:
-            print(str(e))
-    else:
-        output=llm.invoke(query).content
-        memory.save_context(query,output)
+    # judge=determine_task_type(query)
+    # if "complex" in judge:
+    #     try:
+    #         plan=plan_before_implement(query)
+    #         prompt=f"History:\n{str(history)}\n"+plan
+    #         output=complex_agent(prompt)
+    #         history.append({"input":query,"output":output.get("output")})
+    #         logger.info(f"Query: {query}")
+    #         logger.info(f"Plan:{prompt}")
+    #         logger.info(f"Output: {output}")
+    #         print(output)
+    #     except IndexError as e:
+    #         print(str(e))
+    # else:
+    #     pormpt=f"History:{str(history)}\n"+query
+    #     output=llm.invoke(pormpt).content
+    #     history.append({"input":query,"output":output})
+    #     logger.info(f"Query: {query}")
+    #     logger.info(f"Output: {output}")
+    #     print(output)
+    try:
+        plan=plan_before_implement(query)
+        prompt=f"History:\n{str(history)}\n"+plan
+        output=complex_agent(prompt)
+        history.append({"input":query,"output":output.get("output")})
         logger.info(f"Query: {query}")
+        logger.info(f"Plan:{prompt}")
         logger.info(f"Output: {output}")
+        print(output)
+    except IndexError as e:
+        print(str(e))
 
 def plan_before_implement(query):
     template=f"""
+    Here is the conversation history:"{history}",
     Here is the user's request: "{query}",
     These are the tools you can use:{tools_information}
     Please make your best effort to plan the steps in detail to ensure the rigor of the output. 
@@ -119,18 +143,26 @@ def plan_before_implement(query):
     Step n: obtain the final answer.
     """
     result = llm.invoke(template).content
-    prompt=f"""
+    plan=f"""
     Here is the user's request: "{query}",
     These are the tools you can use:{tools_information},
     Here are the steps for your reference:{result}
     """
-    return prompt
+    return plan
 
+history=[]
+while True:
+    query=input("Input:")
+    if query=="exit":
+        break
+    if query=="clear":
+        history=[]
+        print("history clear!")
+        continue
+    # query="请问在2024巴黎奥运会是谁取得了中国队的首枚金牌？他的年龄在今天是多少岁？他年龄的平方又是多少？"
+    task_implement(query)
+    print("*******history*******\n",history)
+    memory_save(history)
 
-# while True:
-#     # query = input("query:")
-
-query="请问在2024巴黎奥运会是谁取得了中国队的首枚金牌？他的年龄在今天是多少岁？他年龄的平方又是多少？"
-task_implement(query)  
 
 

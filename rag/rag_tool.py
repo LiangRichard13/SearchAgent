@@ -50,11 +50,14 @@ query_engine = RouterQueryEngine(
 
 def news_rag(query: str) -> str:
     response=query_engine.query(query)
-    print(str(response))
+    return str(response)
+    
 
 
 rag_tool = Tool(
     name="NewsRag",
     func=news_rag,
-    description="Tool for Accessing News Information"
+    description="Tool for Accessing Past News Information from the 21st century ago"
 )
+
+# print(news_rag("中国队和巴西队比赛结果"))
